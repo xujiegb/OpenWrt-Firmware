@@ -1,0 +1,89 @@
+name: Build OpenWrt
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'OpenWrt Version'
+        required: true
+        default: '25.12.5'
+
+permissions:
+  contents: write
+
+jobs:
+  detect-models:
+    runs-on: ubuntu-26.04
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - id: set-matrix
+        run: |
+          MODELS=$(ls devices | jq -R . | jq -s -c .)
+          echo "matrix=$MODELS" >> $GITHUB_OUTPUT
+
+  build:
+    needs: detect-models
+    runs-on: ubuntu-26.04
+    container:
+      image: registry.access.redhat.com/ubi10/ubi
+    strategy:
+      matrix:
+        model: ${{ fromJson(needs.detect-models.outputs.matrix) }}
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Build Dependencies
+        run: |
+          dnf install -y --nodocs make gcc binutils patch bzip2 gawk gettext git diffutils unzip wget xz perl python3 jq cpio tar zstd
+          dnf clean all
+
+      - name: Load Device Environment
+        run: |
+          cat devices/${{ matrix.model }}/info.env >> $GITHUB_ENV
+
+      - name: Download Image Builder
+        run: |
+          wget https://downloads.openwrt.org/releases/${{ github.event.inputs.version }}/targets/${{ env.TARGET }}/${{ env.SUBTARGET }}/openwrt-imagebuilder-${{ github.event.inputs.version }}-${{ env.TARGET }}-${{ env.SUBTARGET }}.Linux-x86_64.tar.zst
+          tar -xf openwrt-imagebuilder-${{ github.event.inputs.version }}-${{ env.TARGET }}-${{ env.SUBTARGET }}.Linux-x86_64.tar.zst
+          echo "IB_DIR=openwrt-imagebuilder-${{ github.event.inputs.version }}-${{ env.TARGET }}-${{ env.SUBTARGET }}.Linux-x86_64" >> $GITHUB_ENV
+
+      - name: Inject Custom Files and Scripts
+        run: |
+          cd ${{ env.IB_DIR }}
+          mkdir -p files/etc/uci-defaults files/root
+          cp ../devices/${{ matrix.model }}/uci-defaults.sh files/etc/uci-defaults/99-custom-settings
+          chmod +x files/etc/uci-defaults/99-custom-settings
+          if [ -f ../devices/${{ matrix.model }}/third_party.txt ]; then
+            while IFS= read -r url || [ -n "$url" ]; do
+              if [ ! -z "$url" ]; then
+                wget -P files/root/ "$url"
+              fi
+            done < ../devices/${{ matrix.model }}/third_party.txt
+            sed -i '/exit 0/i \
+          apk add --allow-untrusted /root/*.apk && rm -f /root/*.apk
+          ' files/etc/uci-defaults/99-custom-settings
+          fi
+
+      - name: Compile Firmware
+        run: |
+          cd ${{ env.IB_DIR }}
+          PKGS=$(cat ../devices/${{ matrix.model }}/packages.txt | tr '\n' ' ')
+          export FORCE_UNSAFE_CONFIGURE=1
+          make image PROFILE="${{ env.PROFILE }}" PACKAGES="$PKGS" FILES="files"
+
+      - name: Organize Artifacts
+        run: |
+          mkdir -p out
+          cp ${{ env.IB_DIR }}/bin/targets/${{ env.TARGET }}/${{ env.SUBTARGET }}/*-sysupgrade.bin out/ || true
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: v${{ github.event.inputs.version }}
+          name: OpenWrt ${{ github.event.inputs.version }}
+          files: out/*
+          token: ${{ secrets.GITHUB_TOKEN }}
