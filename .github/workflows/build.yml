@@ -1,0 +1,392 @@
+name: Build OpenWrt
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'OpenWrt Version'
+        required: true
+        default: '25.12.5'
+
+permissions:
+  contents: write
+
+jobs:
+  detect-models:
+    runs-on: ubuntu-26.04
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - id: set-matrix
+        run: |
+          MODELS=$(ls devices | jq -R . | jq -s -c .)
+          echo "matrix=$MODELS" >> $GITHUB_OUTPUT
+
+  build:
+    needs: detect-models
+    runs-on: ubuntu-26.04
+    container:
+      image: registry.access.redhat.com/ubi10/ubi
+    strategy:
+      matrix:
+        model: ${{ fromJson(needs.detect-models.outputs.matrix) }}
+      fail-fast: false
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Build Dependencies
+        run: |
+          dnf install -y --nodocs make gcc binutils patch bzip2 gawk gettext git diffutils unzip wget xz perl python3 jq cpio tar zstd ncurses-devel rsync
+          dnf clean all
+
+      - name: Load Device Environment
+        run: |
+          cat devices/${{ matrix.model }}/info.env >> $GITHUB_ENV
+
+      - name: Detect Device Patch
+        id: patch
+        run: |
+          if [ -f devices/${{ matrix.model }}/patch.diff ]; then
+            echo "has_patch=true" >> $GITHUB_OUTPUT
+            echo "Device patch found: devices/${{ matrix.model }}/patch.diff"
+          else
+            echo "has_patch=false" >> $GITHUB_OUTPUT
+            echo "No device patch found."
+          fi
+
+      - name: Download OpenWrt Source
+        if: steps.patch.outputs.has_patch == 'true'
+        run: |
+          wget https://github.com/openwrt/openwrt/archive/refs/tags/v${{ github.event.inputs.version }}.tar.gz -O openwrt.tar.gz
+          tar -xzf openwrt.tar.gz
+          mv openwrt-${{ github.event.inputs.version }} openwrt
+
+      - name: Apply Device Patch
+        if: steps.patch.outputs.has_patch == 'true'
+        run: |
+          cd openwrt
+          git init
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add -A
+          git commit -m "OpenWrt ${{ github.event.inputs.version }} source"
+
+          git apply --check ../devices/${{ matrix.model }}/patch.diff
+          git apply --verbose ../devices/${{ matrix.model }}/patch.diff
+
+      - name: Prepare Source Build Files
+        if: steps.patch.outputs.has_patch == 'true'
+        run: |
+          cd openwrt
+
+          wget -q \
+            https://downloads.openwrt.org/releases/${{ github.event.inputs.version }}/targets/${{ env.TARGET }}/${{ env.SUBTARGET }}/feeds.buildinfo \
+            -O feeds.conf
+
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path("include/feeds.mk")
+          s = p.read_text()
+
+          pattern = re.compile(
+              r'\$\(if \$\(CONFIG_BUILDBOT\),\s*\\\s*'
+              r'echo [\'"]%U/targets/%S/kmods/'
+              r'\$\(LINUX_VERSION\)-\$\(LINUX_RELEASE\)-\$\(LINUX_VERMAGIC\)/packages\.adb'
+              r'[\'"];\s*\)'
+          )
+
+          replacement = (
+              "echo '%U/targets/%S/kmods/"
+              "$(LINUX_VERSION)-$(LINUX_RELEASE)-$(LINUX_VERMAGIC)/packages.adb';"
+          )
+
+          s2, count = pattern.subn(replacement, s, count=1)
+
+          if count != 1:
+              raise SystemExit(
+                  "Failed to modify include/feeds.mk: "
+                  "CONFIG_BUILDBOT kmods block not found"
+              )
+
+          p.write_text(s2)
+          PY
+
+          mkdir -p files/etc/uci-defaults files/root
+
+          cp ../devices/${{ matrix.model }}/uci-defaults.sh \
+            files/etc/uci-defaults/99-custom-settings
+          chmod +x files/etc/uci-defaults/99-custom-settings
+
+          if [ -f ../devices/${{ matrix.model }}/third_party.txt ]; then
+            while IFS= read -r url || [ -n "$url" ]; do
+              if [ ! -z "$url" ]; then
+                wget -P files/root/ "$url"
+              fi
+            done < ../devices/${{ matrix.model }}/third_party.txt
+
+            sed -i '/exit 0/i \
+          apk add --allow-untrusted /root/*.apk && rm -f /root/*.apk
+          ' files/etc/uci-defaults/99-custom-settings
+          fi
+
+          wget -q \
+            https://downloads.openwrt.org/releases/${{ github.event.inputs.version }}/targets/${{ env.TARGET }}/${{ env.SUBTARGET }}/config.buildinfo \
+            -O .config
+
+          sed -i '/^CONFIG_PACKAGE_/d' .config
+
+          cat << EOF >> .config
+          CONFIG_TARGET_${TARGET}=y
+          CONFIG_TARGET_${TARGET}_${SUBTARGET}=y
+          CONFIG_TARGET_${TARGET}_${SUBTARGET}_DEVICE_${PROFILE}=y
+          EOF
+
+          PKGS=$(cat ../devices/${{ matrix.model }}/packages.txt)
+
+          for pkg in $PKGS; do
+            echo "CONFIG_PACKAGE_${pkg}=y" >> .config
+          done
+
+          echo "CONFIG_LUCI_LANG_zh_Hans=y" >> .config
+
+          make defconfig
+
+          echo "===== OpenWrt config ====="
+          grep -E '^CONFIG_TARGET_' .config | sort || true
+          grep -E '^CONFIG_KERNEL_' .config | sort || true
+          grep -E '^CONFIG_LOCALVERSION(_AUTO)?=' .config | sort || true
+
+          echo "===== Build configuration ====="
+          grep -E '^CONFIG_(BUILDBOT|ALL|ALL_KMODS|ALL_NONSHARED)=' .config | sort || true
+
+          echo "===== Selected kernel packages ====="
+          KMOD_COUNT=$(grep -c '^CONFIG_PACKAGE_kmod-.*=y$' .config || true)
+          echo "Selected kmod packages: $KMOD_COUNT"
+          grep '^CONFIG_PACKAGE_kmod-.*=y$' .config | sort || true
+
+          echo "===== Selected packages count ====="
+          PKG_COUNT=$(grep -c '^CONFIG_PACKAGE_.*=y$' .config || true)
+          echo "Selected packages: $PKG_COUNT"
+
+          echo "===== Kernel target configs ====="
+          find target/linux/mediatek -type f \
+            \( -name 'config-*' -o -name '*.config' \) \
+            -print
+
+          echo "===== Kernel config hash ====="
+          grep '=[ym]' \
+            target/linux/mediatek/filogic/config-* \
+            target/linux/mediatek/config-* \
+            target/linux/generic/config-* 2>/dev/null |
+            LC_ALL=C sort |
+            md5sum
+
+          echo "===== LuCI language definitions ====="
+          grep -E '^LUCI_LANG\.(zh_Hans|zh_Hant)|^LUCI_LC_ALIAS\.zh_Hans|^LUCI_LC_ALIAS\.zh_Hant' feeds/luci/luci.mk || true
+
+          echo "===== LuCI language config ====="
+          grep -E '^(CONFIG_LUCI_LANG_|# CONFIG_LUCI_LANG_)' .config | grep -E 'zh_Hans|zh_Hant' || true
+
+          echo "===== Check CONFIG_PACKAGE_luci-i18n-base-zh-cn ====="
+          grep 'luci-i18n-base-zh-cn' .config || echo "NOT SELECTED"
+
+          echo "===== Check LuCI feed i18n files ====="
+          find feeds/luci -type f 2>/dev/null | grep -i 'i18n' | head -100 || true
+
+      - name: Compile Firmware from Source
+        if: steps.patch.outputs.has_patch == 'true'
+        run: |
+          cd openwrt
+          export FORCE_UNSAFE_CONFIGURE=1
+          make -j"$(nproc)"
+
+          echo "===== Final kernel vermagic ====="
+          LOCAL_VERMAGIC=$(find build_dir -name .vermagic -type f -print -exec cat {} \; 2>/dev/null | tail -1)
+          echo "Local kernel vermagic: ${LOCAL_VERMAGIC}"
+
+          echo "===== Final kernel .config.set ====="
+          find build_dir -name .config.set \
+            -print \
+            -exec sh -c '
+              echo "----- $1 -----"
+              cat "$1"
+            ' _ {} \; 2>/dev/null
+
+          echo "===== Official OpenWrt 25.12.5 kmods ====="
+
+          OFFICIAL_KMOD_ROOT="https://downloads.openwrt.org/releases/${{ github.event.inputs.version }}/targets/${{ env.TARGET }}/${{ env.SUBTARGET }}/kmods"
+
+          echo "Official kmods root: ${OFFICIAL_KMOD_ROOT}"
+
+          OFFICIAL_KMOD_DIR=$(
+            wget -qO- "${OFFICIAL_KMOD_ROOT}/" |
+            grep -oE 'href="[0-9][^"]*/"' |
+            sed -E 's/^href="([^"]+)\/"$/\1/' |
+            head -1
+          )
+
+          if [ -z "${OFFICIAL_KMOD_DIR}" ]; then
+            echo "Failed to determine official kmods directory."
+            exit 1
+          fi
+
+          echo "Official kmods directory: ${OFFICIAL_KMOD_DIR}"
+
+          OFFICIAL_VERMAGIC=$(echo "${OFFICIAL_KMOD_DIR}" | sed -E 's/^[0-9.]+-[0-9]+-//')
+          OFFICIAL_KERNEL_VERSION=$(echo "${OFFICIAL_KMOD_DIR}" | sed -E 's/^([0-9.]+)-.*/\1/')
+          OFFICIAL_KERNEL_RELEASE=$(echo "${OFFICIAL_KMOD_DIR}" | sed -E 's/^[0-9.]+-([0-9]+)-.*/\1/')
+
+          echo "Official kernel version: ${OFFICIAL_KERNEL_VERSION}"
+          echo "Official kernel release: ${OFFICIAL_KERNEL_RELEASE}"
+          echo "Official kernel vermagic: ${OFFICIAL_VERMAGIC}"
+          echo "Local kernel vermagic: ${LOCAL_VERMAGIC}"
+
+          if [ "${LOCAL_VERMAGIC}" = "${OFFICIAL_VERMAGIC}" ]; then
+            echo "Kernel vermagic MATCH."
+          else
+            echo "Kernel vermagic MISMATCH."
+          fi
+
+          echo "===== Official kernel APK ====="
+
+          OFFICIAL_KERNEL_APK="${OFFICIAL_KMOD_ROOT%/kmods}/packages/kernel-${OFFICIAL_KERNEL_VERSION}~${OFFICIAL_VERMAGIC}-r1.apk"
+
+          echo "Official kernel APK: ${OFFICIAL_KERNEL_APK}"
+
+          wget -q "${OFFICIAL_KERNEL_APK}" -O /tmp/official-kernel.apk
+
+          echo "===== Official kernel APK metadata ====="
+          tar -xOf /tmp/official-kernel.apk .PKGINFO 2>/dev/null || true
+
+          echo "===== Official kmods packages.adb ====="
+
+          OFFICIAL_KMOD_ADB="${OFFICIAL_KMOD_ROOT}/${OFFICIAL_KMOD_DIR}/packages.adb"
+
+          echo "Official kmods database: ${OFFICIAL_KMOD_ADB}"
+
+          wget -q "${OFFICIAL_KMOD_ADB}" -O /tmp/official-kmods.adb
+
+          echo "Official kmods database size:"
+          ls -lh /tmp/official-kmods.adb
+
+          echo "===== Official kmods database dump ====="
+
+          APK_BIN="staging_dir/host/bin/apk"
+
+          if [ ! -x "${APK_BIN}" ]; then
+            APK_BIN=$(command -v apk || true)
+          fi
+
+          if [ -z "${APK_BIN}" ] || [ ! -x "${APK_BIN}" ]; then
+            echo "apk executable not found."
+            exit 1
+          fi
+
+          echo "Using apk: ${APK_BIN}"
+
+          "${APK_BIN}" adbdump --format json /tmp/official-kmods.adb \
+            > /tmp/official-kmods-dump.json
+
+          echo "Official adbdump top-level type:"
+          jq -r 'type' /tmp/official-kmods-dump.json 2>/dev/null || true
+
+          echo "===== Official kmods database sample ====="
+          jq 'if type == "array" then .[0:5] else . end' \
+            /tmp/official-kmods-dump.json 2>/dev/null || true
+
+          echo "===== Official kmod package names ====="
+
+          jq -r '
+            .packages[]
+            | .name // empty
+          ' /tmp/official-kmods-dump.json |
+            grep '^kmod-' |
+            sort -u |
+            tee /tmp/official-kmods.txt
+
+          echo "===== Official kmod package count ====="
+          wc -l < /tmp/official-kmods.txt
+
+          echo "===== Local selected kmod package names ====="
+
+          grep '^CONFIG_PACKAGE_kmod-.*=y$' .config |
+            sed 's/^CONFIG_PACKAGE_//' |
+            sed 's/=y$//' |
+            sort -u |
+            tee /tmp/local-selected-kmods.txt
+
+          echo "===== Official kmods missing from local selection ====="
+          comm -23 \
+            /tmp/official-kmods.txt \
+            /tmp/local-selected-kmods.txt || true
+
+          echo "===== Local selected kmods not found in official repository ====="
+          comm -13 \
+            /tmp/official-kmods.txt \
+            /tmp/local-selected-kmods.txt || true
+
+          echo "===== Local kmod APKs actually built ====="
+          find bin -type f -name 'kmod-*.apk' -print 2>/dev/null |
+            sed -E 's#^.*/kmod-#kmod-#' |
+            sed -E 's/-6\.12\.94.*\.apk$//' |
+            sort -u |
+            tee /tmp/local-built-kmods.txt || true
+
+      - name: Download Image Builder
+        if: steps.patch.outputs.has_patch != 'true'
+        run: |
+          wget https://downloads.openwrt.org/releases/${{ github.event.inputs.version }}/targets/${{ env.TARGET }}/${{ env.SUBTARGET }}/openwrt-imagebuilder-${{ github.event.inputs.version }}-${{ env.TARGET }}-${{ env.SUBTARGET }}.Linux-x86_64.tar.zst
+          tar -xf openwrt-imagebuilder-${{ github.event.inputs.version }}-${{ env.TARGET }}-${{ env.SUBTARGET }}.Linux-x86_64.tar.zst
+          echo "IB_DIR=openwrt-imagebuilder-${{ github.event.inputs.version }}-${{ env.TARGET }}-${{ env.SUBTARGET }}.Linux-x86_64" >> $GITHUB_ENV
+
+      - name: Inject Custom Files and Scripts
+        if: steps.patch.outputs.has_patch != 'true'
+        run: |
+          cd ${{ env.IB_DIR }}
+          mkdir -p files/etc/uci-defaults files/root
+          cp ../devices/${{ matrix.model }}/uci-defaults.sh files/etc/uci-defaults/99-custom-settings
+          chmod +x files/etc/uci-defaults/99-custom-settings
+          if [ -f ../devices/${{ matrix.model }}/third_party.txt ]; then
+            while IFS= read -r url || [ -n "$url" ]; do
+              if [ ! -z "$url" ]; then
+                wget -P files/root/ "$url"
+              fi
+            done < ../devices/${{ matrix.model }}/third_party.txt
+            sed -i '/exit 0/i \
+          apk add --allow-untrusted /root/*.apk && rm -f /root/*.apk
+          ' files/etc/uci-defaults/99-custom-settings
+          fi
+
+      - name: Compile Firmware
+        if: steps.patch.outputs.has_patch != 'true'
+        run: |
+          cd ${{ env.IB_DIR }}
+          PKGS=$(cat ../devices/${{ matrix.model }}/packages.txt | tr '\n' ' ')
+          export FORCE_UNSAFE_CONFIGURE=1
+          make image PROFILE="${{ env.PROFILE }}" PACKAGES="$PKGS" FILES="files"
+
+      - name: Organize Artifacts
+        run: |
+          mkdir -p out
+
+          if [ "${{ steps.patch.outputs.has_patch }}" = "true" ]; then
+            cp openwrt/bin/targets/${{ env.TARGET }}/${{ env.SUBTARGET }}/*-sysupgrade.bin out/ || true
+          else
+            cp ${{ env.IB_DIR }}/bin/targets/${{ env.TARGET }}/${{ env.SUBTARGET }}/*-sysupgrade.bin out/ || true
+          fi
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: v${{ github.event.inputs.version }}
+          name: OpenWrt ${{ github.event.inputs.version }}
+          files: out/*
+          token: ${{ secrets.GITHUB_TOKEN }}
