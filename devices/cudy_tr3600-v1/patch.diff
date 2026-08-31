@@ -15,7 +15,7 @@ new file mode 100644
 index 00000000000000..559831bde2d0fe
 --- /dev/null
 +++ b/target/linux/mediatek/dts/mt7987b-cudy-tr3600-v1.dts
-@@ -0,0 +1,265 @@
+@@ -0,0 +1,266 @@
 +// SPDX-License-Identifier: GPL-2.0-or-later OR MIT
 +
 +/dts-v1/;
@@ -32,9 +32,9 @@ index 00000000000000..559831bde2d0fe
 +	aliases {
 +		label-mac-device = &gmac1;
 +		led-boot = &led_status_red;
-+		led-failsafe = &led_status_blue;
-+		led-running = &led_status_blue;
-+		led-upgrade = &led_status_blue;
++		led-failsafe = &led_status_red;
++		led-running = &led_status_white;
++		led-upgrade = &led_status_red;
 +		serial0 = &uart0;
 +	};
 +
@@ -51,8 +51,8 @@ index 00000000000000..559831bde2d0fe
 +	gpio-leds {
 +		compatible = "gpio-leds";
 +
-+		led_status_blue: led-0 {
-+			color = <LED_COLOR_ID_BLUE>;
++		led_status_white: led-0 {
++			color = <LED_COLOR_ID_WHITE>;
 +			function = LED_FUNCTION_STATUS;
 +			gpios = <&pio 48 GPIO_ACTIVE_LOW>;
 +		};
@@ -99,6 +99,7 @@ index 00000000000000..559831bde2d0fe
 +
 +&fan {
 +	fan-supply = <&fan_3p3v>;
++ pinctrl-0 = <&pwm_pins>;
 +	pwms = <&pwm 0 50000 0>;
 +	status = "okay";
 +};
@@ -160,13 +161,13 @@ index 00000000000000..559831bde2d0fe
 +
 +			band@0 {
 +				reg = <0>;
-+				nvmem-cells = <&macaddr_bdinfo_de00 3>;
++				nvmem-cells = <&macaddr_bdinfo_de00 0>;
 +				nvmem-cell-names = "mac-address";
 +			};
 +
 +			band@1 {
 +				reg = <1>;
-+				nvmem-cells = <&macaddr_bdinfo_de00 2>;
++				nvmem-cells = <&macaddr_bdinfo_de00 0x10>;
 +				nvmem-cell-names = "mac-address";
 +			};
 +		};
