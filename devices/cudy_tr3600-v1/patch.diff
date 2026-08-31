@@ -99,7 +99,7 @@ index 00000000000000..559831bde2d0fe
 +
 +&fan {
 +	fan-supply = <&fan_3p3v>;
-+ pinctrl-0 = <&pwm_pins>;
++	pinctrl-0 = <&pwm_pins>;
 +	pwms = <&pwm 0 50000 0>;
 +	status = "okay";
 +};
