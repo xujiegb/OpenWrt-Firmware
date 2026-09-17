@@ -89,6 +89,10 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
+          VERSION="${{ github.event.inputs.version }}"
+          LUCI_BRANCH="openwrt-$(echo "$VERSION" | cut -d. -f1,2)"
+          git -C feeds/luci checkout -B "$LUCI_BRANCH"
+
           python3 - <<'PY'
           from pathlib import Path
           import re
