@@ -1,1 +1,1 @@
-https://github.com/xujiegb/luci-theme-aurora/releases/download/v1.2.0/luci-theme-aurora-1.4.0-r20260920.apk
+https://github.com/xujiegb/luci-theme-aurora/releases/download/v1.4.0/luci-theme-aurora-1.4.0-r20260920.apk
