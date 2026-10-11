@@ -15,7 +15,7 @@ new file mode 100644
 index 00000000000000..559831bde2d0fe
 --- /dev/null
 +++ b/target/linux/mediatek/dts/mt7987b-cudy-tr3600-v1.dts
-@@ -0,0 +1,266 @@
+@@ -0,0 +1,268 @@
 +// SPDX-License-Identifier: GPL-2.0-or-later OR MIT
 +
 +/dts-v1/;
@@ -99,7 +99,6 @@ index 00000000000000..559831bde2d0fe
 +
 +&fan {
 +	fan-supply = <&fan_3p3v>;
-+	pinctrl-0 = <&pwm_pins>;
 +	pwms = <&pwm 0 50000 0>;
 +	status = "okay";
 +};
@@ -126,7 +125,9 @@ index 00000000000000..559831bde2d0fe
 +		reg = <1>;
 +		reset-gpios = <&pio 42 GPIO_ACTIVE_LOW>;
 +		reset-assert-us = <100000>;
-+		reset-deassert-us = <120000>;
++		reset-deassert-us = <100000>;
++		interrupt-parent = <&pio>;
++		interrupts = <41 IRQ_TYPE_LEVEL_LOW>;
 +	};
 +
 +	phy15: phy@f {
@@ -167,7 +168,7 @@ index 00000000000000..559831bde2d0fe
 +
 +			band@1 {
 +				reg = <1>;
-+				nvmem-cells = <&macaddr_bdinfo_de00 0x10>;
++				nvmem-cells = <&macaddr_bdinfo_de00 2>;
 +				nvmem-cell-names = "mac-address";
 +			};
 +		};
