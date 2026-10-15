@@ -1,13 +1,12 @@
 diff --git a/package/boot/uboot-tools/uboot-envtools/files/mediatek_filogic b/package/boot/uboot-tools/uboot-envtools/files/mediatek_filogic
-index fc00ff09577280..ff394d7c9ec180 100644
+index fac81e7d69aaef..9a1e5b39617946 100644
 --- a/package/boot/uboot-tools/uboot-envtools/files/mediatek_filogic
 +++ b/package/boot/uboot-tools/uboot-envtools/files/mediatek_filogic
-@@ -143,6 +143,13 @@ comfast,cf-wa933|\
- comfast,cf-wa933-128m)
- 	ubootenv_add_uci_config "/dev/mtd1" "0x0" "0x20000" "0x20000"
+@@ -130,6 +130,12 @@ comfast,cf-e393ax|\
+ iptime,ax3000m)
+ 	ubootenv_add_uci_config "/dev/mtd1" "0x0" "0x20000" "0x80000"
  	;;
-+cudy,tr3600-v1|\
-+ltc,vl7m19k)
++cudy,tr3600-v1)
 +	. /lib/upgrade/nand.sh
 +	envubi=$(nand_find_ubi ubi)
 +	envdev=/dev/$(nand_find_volume "$envubi" u-boot-env)
@@ -16,44 +15,20 @@ index fc00ff09577280..ff394d7c9ec180 100644
  dlink,aquila-pro-ai-e30-a1|\
  dlink,aquila-pro-ai-m30-a1|\
  dlink,aquila-pro-ai-m60-a1)
-@@ -161,12 +168,6 @@ jiorouter,ax6000-jidu6j01)
- 	envdev=/dev/$(nand_find_volume "$envubi" u-boot-env)
- 	ubootenv_add_uci_config "$envdev" "0x0" "0x80000" "0x1f000" "5"
- 	;;
--ltc,vl7m19k)
--	. /lib/upgrade/nand.sh
--	envubi=$(nand_find_ubi ubi)
--	envdev=/dev/$(nand_find_volume "$envubi" u-boot-env)
--	ubootenv_add_uci_config "$envdev" "0x0" "0x80000" "0x80000" "1"
--	;;
- openembed,som7981)
- 	ubootenv_add_uci_config "/dev/mtd1" "0x0" "0x80000" "0x80000"
- 	ubootenv_add_uci_sys_config "/dev/mtd3" "0x0" "0x100000" "0x100000"
 diff --git a/package/network/config/wifi-scripts/files-ucode/usr/share/wifi_devices.json b/package/network/config/wifi-scripts/files-ucode/usr/share/wifi_devices.json
-index 64218b6e4ff8ab..b8b104fb2d30d9 100644
+index 64218b6e4ff8ab..061984f5073d09 100644
 --- a/package/network/config/wifi-scripts/files-ucode/usr/share/wifi_devices.json
 +++ b/package/network/config/wifi-scripts/files-ucode/usr/share/wifi_devices.json
-@@ -1,5 +1,5 @@
- {
--	"pci": [		
-+	"pci": [
- 		[ "0x0777", "0x11ac", "0x0777", "0xe7f9", 0, 0, "Ubiquiti", "LiteBeam, 5AC" ],
- 		[ "0xffff", "0xffff", "0xffff", "0xb102", 0, 0, "Ubiquiti", "PowerStation2, (18V)" ],
- 		[ "0xffff", "0xffff", "0xffff", "0xb202", 0, 0, "Ubiquiti", "PowerStation2, (16D)" ],
-@@ -190,8 +190,9 @@
- 		[ "0x14c3", "0x7662", "0x14c3", "0x7662", 0, 0, "MediaTek", "MT76x2E" ],
- 		[ "0x14c3", "0x7915", "0x14c3", "0x7915", 0, 0, "MediaTek", "MT7915E" ],
+@@ -192,6 +192,7 @@
  		[ "0x14c3", "0x7906", "0x14c3", "0x7906", 0, 0, "MediaTek", "MT7916AN" ],
--		[ "0x14c3", "0x7990", "0x14C3", "0x6639", 0, 0, "MediaTek", "MT7996E" ],
--		[ "0x14c3", "0x7992", "0x14C3", "0x7992", 0, 0, "MediaTek", "MT7992E" ],
-+		[ "0x14c3", "0x7990", "0x14c3", "0x6639", 0, 0, "MediaTek", "MT7996E" ],
-+		[ "0x14c3", "0x7992", "0x14c3", "0x7992", 0, 0, "MediaTek", "MT7992E" ],
+ 		[ "0x14c3", "0x7990", "0x14C3", "0x6639", 0, 0, "MediaTek", "MT7996E" ],
+ 		[ "0x14c3", "0x7992", "0x14C3", "0x7992", 0, 0, "MediaTek", "MT7992E" ],
 +		[ "0x14c3", "0x7993", "0x14c3", "0x7993", 0, 0, "MediaTek", "MT7990E" ],
  		[ "0x14e4", "0xaa52", "0x14e4", "0xaa52", 0, 0, "Broadcom", "BCM43602" ],
  		[ "0x02d0", "0xa9a6", "0x0000", "0x0000", 0, 0, "Cypress", "CYW43455" ],
  		[ "0x02d0", "0x4345", "0x0000", "0x0000", 0, 0, "Cypress", "CYW43455" ],
 diff --git a/target/linux/mediatek/base-files/lib/preinit/05_set_preinit_iface b/target/linux/mediatek/base-files/lib/preinit/05_set_preinit_iface
-index 007fb5463f23c7..40618963b9a1f3 100644
+index 40b9a926c25c0c..970436866de727 100644
 --- a/target/linux/mediatek/base-files/lib/preinit/05_set_preinit_iface
 +++ b/target/linux/mediatek/base-files/lib/preinit/05_set_preinit_iface
 @@ -6,6 +6,7 @@ set_preinit_iface() {
@@ -308,24 +283,24 @@ index 00000000000000..d47e58414f631a
 +	status = "okay";
 +};
 diff --git a/target/linux/mediatek/filogic/base-files/etc/board.d/02_network b/target/linux/mediatek/filogic/base-files/etc/board.d/02_network
-index 73d929f6f6fd2e..fea15d0115e576 100644
+index b60e3062dd8ace..2845db2475850a 100644
 --- a/target/linux/mediatek/filogic/base-files/etc/board.d/02_network
 +++ b/target/linux/mediatek/filogic/base-files/etc/board.d/02_network
-@@ -182,6 +182,7 @@ mediatek_setup_interfaces()
+@@ -155,6 +155,7 @@ mediatek_setup_interfaces()
  	cudy,tr3000-256mb-v1|\
  	cudy,tr3000-v1|\
  	cudy,tr3000-v1-ubootmod|\
 +	cudy,tr3600-v1|\
- 	glinet,gl-be10000|\
  	glinet,gl-mt2500|\
  	glinet,gl-mt2500-airoha|\
+ 	glinet,gl-mt3000|\
 diff --git a/target/linux/mediatek/image/filogic.mk b/target/linux/mediatek/image/filogic.mk
-index c1ff617bdbbd17..2b133b852d1727 100644
+index 1696036692b582..00f978f1e36e61 100644
 --- a/target/linux/mediatek/image/filogic.mk
 +++ b/target/linux/mediatek/image/filogic.mk
-@@ -1542,6 +1542,25 @@ define Device/cudy_tr3000-v1-ubootmod
+@@ -1190,6 +1190,25 @@ define Device/cudy_m3000-v1-ubootmod
  endef
- TARGET_DEVICES += cudy_tr3000-v1-ubootmod
+ TARGET_DEVICES += cudy_m3000-v1-ubootmod
  
 +define Device/cudy_tr3600-v1
 +  DEVICE_VENDOR := Cudy
@@ -346,6 +321,6 @@ index c1ff617bdbbd17..2b133b852d1727 100644
 +endef
 +TARGET_DEVICES += cudy_tr3600-v1
 +
- define Device/cudy_wr3000-v1
+ define Device/cudy_m3000-v2-yt8821
    DEVICE_VENDOR := Cudy
-   DEVICE_MODEL := WR3000
+   DEVICE_MODEL := M3000
